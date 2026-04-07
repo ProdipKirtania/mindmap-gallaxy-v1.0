@@ -1,0 +1,61 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Barlow", ui-sans-serif, system-ui, sans-serif;
+  --color-bg: #05070a;
+  --color-accent: #00d2ff;
+  --color-gold: #ffd700;
+}
+
+@layer base {
+  body {
+    @apply bg-bg text-white font-sans overflow-hidden;
+  }
+}
+
+.node circle {
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.node text {
+  @apply pointer-events-auto cursor-text select-text fill-white opacity-100;
+  transition: opacity 0.4s;
+  paint-order: stroke;
+  stroke: #05070a;
+  stroke-width: 4px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.link {
+  @apply fill-none stroke-white/20 stroke-2;
+  transition: all 0.4s;
+}
+
+.dimmed {
+  @apply !opacity-10;
+}
+
+.hidden-node {
+  @apply !opacity-0 !pointer-events-none;
+}
+
+.focused {
+  @apply !opacity-100;
+  stroke-opacity: 0.9 !important;
+  stroke-width: 3.5px !important;
+}
+
+.completed {
+  stroke: var(--color-gold) !important;
+  filter: drop-shadow(0 0 8px var(--color-gold));
+}
+
+.node:hover .node-controls {
+  @apply opacity-100;
+}
+
+.node-controls circle {
+  @apply drop-shadow-md;
+}

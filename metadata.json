@@ -1,0 +1,5 @@
+{
+  "name": "Knowledge Galaxy Pro",
+  "description": "An advanced interactive knowledge map with real-time synchronization, focus modes, and high-performance D3.js visualizations.",
+  "requestFramePermissions": []
+}
