@@ -9,9 +9,10 @@ import { parseMarkdown, ensureIds, generateMarkdown } from "./lib/parser";
 import { INITIAL_MARKDOWN } from "./constants";
 import { motion, AnimatePresence } from "motion/react";
 import { Maximize2, RotateCcw, Plus, Minus, Copy, Search, Download, Trash2, Save, LayoutPanelLeft, LayoutPanelTop, FileText, X, Settings2 } from "lucide-react";
-import { NodeData, FocusSettings, FocusAction } from "./types";
+import { NodeData, FocusSettings, FocusAction, SearchResult, LayoutSettings } from "./types";
 
 const STORAGE_KEY = "knowledge-galaxy-data";
+const LAYOUT_STORAGE_KEY = "knowledge-galaxy-layout";
 
 export default function App() {
   const [data, setData] = useState<NodeData>(() => {
@@ -26,6 +27,21 @@ export default function App() {
     return ensureIds(parseMarkdown(INITIAL_MARKDOWN));
   });
 
+  const [layoutSettings, setLayoutSettings] = useState<LayoutSettings>(() => {
+    const saved = localStorage.getItem(LAYOUT_STORAGE_KEY);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error("Failed to parse saved layout settings", e);
+      }
+    }
+    return {
+      verticalSpacing: 45,
+      horizontalSpacing: 250
+    };
+  });
+
   const [history, setHistory] = useState<NodeData[]>([]);
   const [redoStack, setRedoStack] = useState<NodeData[]>([]);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
@@ -38,6 +54,8 @@ export default function App() {
   const [showFocusSettings, setShowFocusSettings] = useState(false);
   const [showToast, setShowToast] = useState<{ message: string; visible: boolean }>({ message: "", visible: false });
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchIndex, setSearchIndex] = useState(-1);
   const [showMarkdown, setShowMarkdown] = useState(false);
   const [markdown, setMarkdown] = useState(() => generateMarkdown(data));
   const galaxyRef = useRef<KnowledgeGalaxyRef>(null);
@@ -117,6 +135,22 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleUndo, handleRedo, selectedNodeIds]);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchQuery.trim() && galaxyRef.current) {
+        const results = galaxyRef.current.searchNodes(searchQuery);
+        setSearchResults(results);
+        setSearchIndex(-1);
+        galaxyRef.current.highlightNodes(results.map(r => r.id));
+      } else {
+        setSearchResults([]);
+        setSearchIndex(-1);
+        galaxyRef.current?.highlightNodes([]);
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
   const triggerToast = (message: string) => {
     setShowToast({ message, visible: true });
     setTimeout(() => setShowToast({ message: "", visible: false }), 2000);
@@ -133,11 +167,30 @@ export default function App() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (searchQuery.trim() && galaxyRef.current) {
-      const found = galaxyRef.current.findAndZoom(searchQuery);
-      if (!found) {
-        triggerToast("NODE NOT FOUND");
-      }
+    const targetIndex = searchIndex >= 0 ? searchIndex : 0;
+    if (searchResults.length > targetIndex && galaxyRef.current) {
+      galaxyRef.current.findAndZoom(searchResults[targetIndex].id);
+      setSearchQuery("");
+      setSearchResults([]);
+      setSearchIndex(-1);
+    } else if (searchQuery.trim()) {
+      triggerToast("NODE NOT FOUND");
+    }
+  };
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
+    if (searchResults.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSearchIndex(prev => (prev + 1) % searchResults.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSearchIndex(prev => (prev - 1 + searchResults.length) % searchResults.length);
+    } else if (e.key === "Escape") {
+      setSearchQuery("");
+      setSearchResults([]);
+      setSearchIndex(-1);
     }
   };
 
@@ -215,9 +268,44 @@ export default function App() {
             placeholder="Search nodes..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
             className="bg-white/10 border border-white/20 rounded-lg px-4 py-2 pl-10 text-xs outline-none focus:border-accent/50 transition-all w-40 focus:w-64"
           />
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 opacity-40 group-focus-within:opacity-100 transition-opacity" />
+          
+          {/* Search Results Dropdown */}
+          <AnimatePresence>
+            {searchResults.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                className="absolute top-full left-0 right-0 mt-2 bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 max-h-64 overflow-y-auto"
+              >
+                {searchResults.map((result, idx) => (
+                  <button
+                    key={result.id}
+                    type="button"
+                    onClick={() => {
+                      galaxyRef.current?.findAndZoom(result.id);
+                      setSearchQuery("");
+                      setSearchResults([]);
+                      setSearchIndex(-1);
+                    }}
+                    className={`w-full text-left px-4 py-3 transition-colors border-b border-white/5 last:border-none ${searchIndex === idx ? "bg-accent/20" : "hover:bg-white/10"}`}
+                  >
+                    <div className="text-xs font-bold text-accent">{result.name}</div>
+                    <div className="text-[9px] opacity-40 truncate mt-0.5">{result.path}</div>
+                    {result.metadata && (
+                      <div className="text-[9px] opacity-60 italic mt-1 line-clamp-1">
+                        "{result.metadata}"
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </form>
 
         <button
@@ -342,13 +430,14 @@ export default function App() {
           data={data} 
           focusMode={focusMode} 
           focusSettings={focusSettings}
+          layoutSettings={layoutSettings}
           onDataChange={updateData}
           selectedNodeIds={selectedNodeIds}
           onSelectionChange={setSelectedNodeIds}
         />
       </div>
 
-      {/* Focus Settings Popover */}
+      {/* Settings Popover */}
       <AnimatePresence>
         {showFocusSettings && (
           <motion.div
@@ -357,6 +446,50 @@ export default function App() {
             exit={{ opacity: 0, y: 10, scale: 0.95 }}
             className="fixed top-20 right-5 z-40 bg-black/80 backdrop-blur-xl border border-white/10 p-4 rounded-xl shadow-2xl w-64"
           >
+            <div className="mb-6">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-accent mb-4">Layout Settings</h3>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <div className="flex justify-between text-[10px] uppercase font-bold opacity-60">
+                    <span>Vertical Spacing</span>
+                    <span>{layoutSettings.verticalSpacing}px</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="20" 
+                    max="150" 
+                    value={layoutSettings.verticalSpacing}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      const newSettings = { ...layoutSettings, verticalSpacing: val };
+                      setLayoutSettings(newSettings);
+                      localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(newSettings));
+                    }}
+                    className="w-full accent-accent"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-[10px] uppercase font-bold opacity-60">
+                    <span>Horizontal Spacing</span>
+                    <span>{layoutSettings.horizontalSpacing}px</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="100" 
+                    max="500" 
+                    value={layoutSettings.horizontalSpacing}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      const newSettings = { ...layoutSettings, horizontalSpacing: val };
+                      setLayoutSettings(newSettings);
+                      localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(newSettings));
+                    }}
+                    className="w-full accent-accent"
+                  />
+                </div>
+              </div>
+            </div>
+
             <h3 className="text-[10px] font-bold uppercase tracking-widest text-accent mb-4">Focus Mode Settings</h3>
             
             <div className="space-y-4">

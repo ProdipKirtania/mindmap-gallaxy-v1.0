@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from "react";
 import * as d3 from "d3";
-import { HierarchyNode, HierarchyLink, NodeData, FocusSettings, FocusAction } from "../types";
+import { HierarchyNode, HierarchyLink, NodeData, FocusSettings, FocusAction, SearchResult, LayoutSettings } from "../types";
 import { cn } from "../lib/utils";
 
 interface KnowledgeGalaxyProps {
   data: NodeData;
   focusMode: boolean;
   focusSettings: FocusSettings;
+  layoutSettings: LayoutSettings;
   onDataChange: (data: NodeData) => void;
   selectedNodeIds: string[];
   onSelectionChange: (ids: string[]) => void;
@@ -20,7 +21,9 @@ export interface KnowledgeGalaxyRef {
   zoomIn: () => void;
   zoomOut: () => void;
   copyVisibleOutline: () => string;
-  findAndZoom: (query: string) => boolean;
+  searchNodes: (query: string) => SearchResult[];
+  highlightNodes: (ids: string[]) => void;
+  findAndZoom: (nodeIdOrQuery: string) => boolean;
   exportToMarkdown: () => string;
   deleteSelectedNodes: () => void;
   addChildToSelected: () => void;
@@ -36,6 +39,7 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
   data, 
   focusMode, 
   focusSettings,
+  layoutSettings,
   onDataChange,
   selectedNodeIds,
   onSelectionChange
@@ -60,9 +64,10 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
     metadata?: string;
   } | null>(null);
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  const [searchHighlightIds, setSearchHighlightIds] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const tree = d3.tree<NodeData>().nodeSize([45, 250]);
+  const tree = d3.tree<NodeData>().nodeSize([layoutSettings.verticalSpacing, layoutSettings.horizontalSpacing]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -235,7 +240,7 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
 
     tree(root);
 
-    nodes.forEach((d) => (d.y = d.depth * 240));
+    nodes.forEach((d) => (d.y = d.depth * layoutSettings.horizontalSpacing));
 
     // Nodes
     const node = g.selectAll<SVGGElement, HierarchyNode>(".node")
@@ -372,7 +377,13 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
     nodeUpdate.transition()
       .duration(800)
       .ease(d3.easeCubicInOut)
-      .attr("transform", (d) => `translate(${d.y},${d.x})`);
+      .attr("transform", (d) => `translate(${d.y},${d.x})`)
+      .style("opacity", (d) => {
+        if (searchHighlightIds.length > 0) {
+          return searchHighlightIds.includes(d.data.id) ? 1 : 0.1;
+        }
+        return 1;
+      });
 
     nodeUpdate.select(".node-main-circle")
       .attr("r", (d) => (d.depth === 0 ? 12 : 7))
@@ -404,15 +415,18 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
       .attr("d", () => {
         const o = { x: source.x0 || 0, y: source.y0 || 0 };
         return diagonal(o, o);
-      })
-      .each(function (d) {
-        d.target.parentLink = this;
       });
 
     linkEnter.merge(link)
       .transition()
       .duration(800)
-      .attr("d", (d) => diagonal(d.source, d.target));
+      .attr("d", (d) => diagonal(d.source, d.target))
+      .style("opacity", (d) => {
+        if (searchHighlightIds.length > 0) {
+          return searchHighlightIds.includes(d.target.data.id) ? 1 : 0.1;
+        }
+        return 1;
+      });
 
     link.exit().transition().duration(600).attr("d", () => diagonal(source, source)).remove();
 
@@ -613,10 +627,71 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
       traverse(root, 0);
       return output;
     },
-    findAndZoom: (query: string) => {
+    searchNodes: (query: string) => {
+      if (!root) return [];
+      const q = query.toLowerCase().trim();
+      if (!q) return [];
+
+      const results: SearchResult[] = [];
+      const nodes = root.descendants();
+      
+      const fuzzyMatch = (text: string, query: string) => {
+        let score = 0;
+        const t = text.toLowerCase();
+        const q = query.toLowerCase();
+        
+        if (t === q) return 100;
+        if (t.startsWith(q)) return 80;
+        if (t.includes(q)) return 60;
+        
+        // Character sequence match (fuzzy)
+        let queryIdx = 0;
+        for (let i = 0; i < t.length && queryIdx < q.length; i++) {
+          if (t[i] === q[queryIdx]) {
+            queryIdx++;
+            score += 5;
+          }
+        }
+        
+        return queryIdx === q.length ? score : 0;
+      };
+
+      nodes.forEach(n => {
+        const nameScore = fuzzyMatch(n.data.name, q);
+        const metaScore = n.data.metadata ? fuzzyMatch(n.data.metadata, q) * 0.5 : 0;
+        const totalScore = Math.max(nameScore, metaScore);
+        
+        if (totalScore > 0) {
+          const path = n.ancestors()
+            .reverse()
+            .map(a => a.data.name)
+            .join(" > ");
+            
+          results.push({
+            id: n.data.id,
+            name: n.data.name,
+            metadata: n.data.metadata,
+            path,
+            score: totalScore
+          });
+        }
+      });
+      
+      return results.sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 10);
+    },
+    highlightNodes: (ids: string[]) => {
+      setSearchHighlightIds(ids);
+      if (root) update(root);
+    },
+    findAndZoom: (nodeIdOrQuery: string) => {
       if (!root || !svgRef.current || !zoomRef.current) return false;
       const nodes = root.descendants();
-      const match = nodes.find(n => n.data.name.toLowerCase().includes(query.toLowerCase()));
+      
+      // Try to find by ID first, then by name query
+      let match = nodes.find(n => n.data.id === nodeIdOrQuery);
+      if (!match) {
+        match = nodes.find(n => n.data.name.toLowerCase().includes(nodeIdOrQuery.toLowerCase()));
+      }
       
       if (match) {
         // Expand path to match
@@ -647,6 +722,7 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
         applyFocus(match as HierarchyNode);
         setFocusedNodeId(match.data.id);
         onSelectionChange([match.data.id]);
+        setSearchHighlightIds([]); // Clear highlight on focus
         return true;
       }
       return false;

@@ -8,6 +8,11 @@ export interface FocusSettings {
   unrelated: FocusAction;
 }
 
+export interface LayoutSettings {
+  verticalSpacing: number;
+  horizontalSpacing: number;
+}
+
 export interface NodeData {
   id: string;
   name: string;
@@ -15,6 +20,14 @@ export interface NodeData {
   color?: string;
   metadata?: string;
   collapsed?: boolean;
+}
+
+export interface SearchResult {
+  id: string;
+  name: string;
+  metadata?: string;
+  path: string; // e.g. "Root > Parent > Child"
+  score?: number;
 }
 
 export interface HierarchyNode extends d3.HierarchyNode<NodeData> {
@@ -25,7 +38,6 @@ export interface HierarchyNode extends d3.HierarchyNode<NodeData> {
   id?: string;
   _children?: HierarchyNode[] | null;
   el?: SVGGElement;
-  parentLink?: SVGPathElement;
   children: HierarchyNode[] | null;
   parent: HierarchyNode | null;
   depth: number;
