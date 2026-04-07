@@ -8,7 +8,7 @@ import KnowledgeGalaxy, { KnowledgeGalaxyRef } from "./components/KnowledgeGalax
 import { parseMarkdown, ensureIds, generateMarkdown } from "./lib/parser";
 import { INITIAL_MARKDOWN } from "./constants";
 import { motion, AnimatePresence } from "motion/react";
-import { Maximize2, RotateCcw, Plus, Minus, Copy, Search, Download, Trash2, Save, LayoutPanelLeft, LayoutPanelTop, FileText, X, Settings2 } from "lucide-react";
+import { Maximize2, RotateCcw, Plus, Minus, Copy, Search, Download, Trash2, Save, LayoutPanelLeft, LayoutPanelTop, FileText, X, Settings2, FileCode, Image } from "lucide-react";
 import { NodeData, FocusSettings, FocusAction, SearchResult, LayoutSettings } from "./types";
 
 const STORAGE_KEY = "knowledge-galaxy-data";
@@ -208,6 +208,34 @@ export default function App() {
     }
   };
 
+  const handleExportSVG = () => {
+    if (galaxyRef.current) {
+      const svg = galaxyRef.current.exportToSVG();
+      const blob = new Blob([svg], { type: "image/svg+xml" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${data.name.toLowerCase().replace(/\s+/g, "-")}.svg`;
+      a.click();
+      URL.revokeObjectURL(url);
+      triggerToast("SVG EXPORTED!");
+    }
+  };
+
+  const handleExportInteractiveHTML = () => {
+    if (galaxyRef.current) {
+      const html = galaxyRef.current.exportToInteractiveHTML();
+      const blob = new Blob([html], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${data.name.toLowerCase().replace(/\s+/g, "-")}-interactive.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+      triggerToast("INTERACTIVE HTML EXPORTED!");
+    }
+  };
+
   const handleReset = () => {
     if (confirm("Are you sure you want to reset the galaxy to its initial state? All edits will be lost.")) {
       const initial = parseMarkdown(INITIAL_MARKDOWN);
@@ -308,42 +336,72 @@ export default function App() {
           </AnimatePresence>
         </form>
 
-        <button
-          onClick={() => setShowMarkdown(!showMarkdown)}
-          className={`flex items-center gap-2 border px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all active:scale-95 ${showMarkdown ? "bg-accent text-black border-accent" : "bg-white/10 border-white/20 text-white hover:bg-white/20"}`}
-          title="Toggle Markdown Editor"
-        >
-          <FileText size={14} />
-          Editor
-        </button>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[9px] uppercase font-bold opacity-30 px-1">Navigation</span>
+          <button
+            onClick={() => setShowMarkdown(!showMarkdown)}
+            className={`flex items-center gap-2 border px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all active:scale-95 ${showMarkdown ? "bg-accent text-black border-accent" : "bg-white/10 border-white/20 text-white hover:bg-white/20"}`}
+            title="Toggle Markdown Editor"
+          >
+            <FileText size={14} />
+            Editor
+          </button>
+        </div>
 
-        <button
-          onClick={handleCopy}
-          className="flex items-center gap-2 bg-white/10 border border-white/20 text-white px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all hover:bg-white/20 active:scale-95"
-          title="Copy as Outline"
-        >
-          <Copy size={14} />
-          Copy
-        </button>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[9px] uppercase font-bold opacity-30 px-1">Clipboard</span>
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-2 bg-white/10 border border-white/20 text-white px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all hover:bg-white/20 active:scale-95"
+            title="Copy as Outline"
+          >
+            <Copy size={14} />
+            Copy Outline
+          </button>
+        </div>
 
-        <button
-          onClick={handleExportMarkdown}
-          className="flex items-center gap-2 bg-white/10 border border-white/20 text-white px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all hover:bg-white/20 active:scale-95"
-          title="Download as Markdown"
-        >
-          <Download size={14} />
-          Export
-        </button>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[9px] uppercase font-bold opacity-30 px-1">Export</span>
+          <div className="flex gap-1">
+            <button
+              onClick={handleExportMarkdown}
+              className="flex items-center gap-2 bg-white/10 border border-white/20 text-white px-3 py-2 rounded-lg text-[9px] font-bold uppercase transition-all hover:bg-white/20 active:scale-95"
+              title="Download as Markdown"
+            >
+              <Download size={12} />
+              MD
+            </button>
+            <button
+              onClick={handleExportSVG}
+              className="flex items-center gap-2 bg-white/10 border border-white/20 text-white px-3 py-2 rounded-lg text-[9px] font-bold uppercase transition-all hover:bg-white/20 active:scale-95"
+              title="Download as SVG"
+            >
+              <Image size={12} />
+              SVG
+            </button>
+            <button
+              onClick={handleExportInteractiveHTML}
+              className="flex items-center gap-2 bg-white/10 border border-white/20 text-white px-3 py-2 rounded-lg text-[9px] font-bold uppercase transition-all hover:bg-white/20 active:scale-95"
+              title="Download Interactive HTML"
+            >
+              <FileCode size={12} />
+              HTML
+            </button>
+          </div>
+        </div>
 
-        <button
-          onClick={() => galaxyRef.current?.groupSelectedNodes()}
-          disabled={selectedNodeIds.length < 2}
-          className="flex items-center gap-2 bg-gold/20 border border-gold/40 text-gold px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all hover:bg-gold/30 active:scale-95 disabled:opacity-20"
-          title="Group Selected Nodes (Alt+G)"
-        >
-          <LayoutPanelTop size={14} />
-          Group
-        </button>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[9px] uppercase font-bold opacity-30 px-1">Tools</span>
+          <button
+            onClick={() => galaxyRef.current?.groupSelectedNodes()}
+            disabled={selectedNodeIds.length < 2}
+            className="flex items-center gap-2 bg-gold/20 border border-gold/40 text-gold px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all hover:bg-gold/30 active:scale-95 disabled:opacity-20"
+            title="Group Selected Nodes (Alt+G)"
+          >
+            <LayoutPanelTop size={14} />
+            Group
+          </button>
+        </div>
 
         <div className="flex items-center gap-3 bg-white/10 backdrop-blur-md border border-white/20 px-3 py-1.5 rounded-full">
           <span className={focusMode ? "text-accent text-[10px] font-extrabold uppercase" : "text-white/40 text-[10px] font-extrabold uppercase"}>
@@ -367,13 +425,16 @@ export default function App() {
           </button>
         </div>
 
-        <button
-          onClick={handleReset}
-          className="bg-red-500/20 border border-red-500/40 text-red-200 px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all hover:bg-red-500/30 active:scale-95"
-          title="Reset to Initial State"
-        >
-          <Trash2 size={14} />
-        </button>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[9px] uppercase font-bold opacity-30 px-1">System</span>
+          <button
+            onClick={handleReset}
+            className="bg-red-500/20 border border-red-500/40 text-red-200 px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all hover:bg-red-500/30 active:scale-95"
+            title="Reset to Initial State"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
       </div>
 
       {/* Bottom Controls */}

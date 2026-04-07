@@ -25,6 +25,8 @@ export interface KnowledgeGalaxyRef {
   highlightNodes: (ids: string[]) => void;
   findAndZoom: (nodeIdOrQuery: string) => boolean;
   exportToMarkdown: () => string;
+  exportToSVG: () => string;
+  exportToInteractiveHTML: () => string;
   deleteSelectedNodes: () => void;
   addChildToSelected: () => void;
   groupSelectedNodes: () => void;
@@ -739,6 +741,181 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
       };
       traverse(root, 0);
       return md;
+    },
+    exportToSVG: () => {
+      if (!svgRef.current) return "";
+      const svg = svgRef.current.cloneNode(true) as SVGSVGElement;
+      svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      
+      // Add styles
+      const style = document.createElement("style");
+      style.textContent = `
+        @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700&display=swap');
+        svg { background: #05070a; font-family: 'Barlow', sans-serif; }
+        .node circle { transition: all 0.4s; }
+        .node text { fill: white; font-size: 14px; paint-order: stroke; stroke: #05070a; stroke-width: 4px; stroke-linecap: round; stroke-linejoin: round; }
+        .link { fill: none; stroke: rgba(255,255,255,0.2); stroke-width: 2px; }
+        .node-main-circle { stroke-width: 2px; }
+      `;
+      svg.prepend(style);
+      
+      // Remove UI elements like controls
+      const d3Svg = d3.select(svg);
+      d3Svg.selectAll(".node-controls").remove();
+      d3Svg.selectAll(".selection-ring").remove();
+      
+      const serializer = new XMLSerializer();
+      return serializer.serializeToString(svg);
+    },
+    exportToInteractiveHTML: () => {
+      if (!root) return "";
+      
+      const jsonData = JSON.stringify(data);
+      const layoutData = JSON.stringify(layoutSettings);
+      
+      return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Knowledge Galaxy Export</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #05070a; color: white; font-family: 'Barlow', sans-serif; }
+        #galaxy { width: 100%; height: 100%; cursor: grab; }
+        #galaxy:active { cursor: grabbing; }
+        .node circle { transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; }
+        .node text { pointer-events: none; fill: white; font-size: 14px; paint-order: stroke; stroke: #05070a; stroke-width: 4px; stroke-linecap: round; stroke-linejoin: round; }
+        .link { fill: none; stroke: rgba(255,255,255,0.2); stroke-width: 2px; transition: all 0.4s; }
+        .node-main-circle { stroke-width: 2px; }
+        #controls { position: fixed; bottom: 20px; left: 20px; display: flex; gap: 10px; z-index: 100; }
+        .btn { background: rgba(255,255,255,0.1); border: 1px border rgba(255,255,255,0.2); color: white; padding: 8px 15px; border-radius: 20px; cursor: pointer; font-size: 12px; text-transform: uppercase; font-weight: bold; transition: all 0.2s; }
+        .btn:hover { background: rgba(255,255,255,0.2); }
+    </style>
+</head>
+<body>
+    <svg id="galaxy"><g id="container"></g></svg>
+    <div id="controls">
+        <button class="btn" onclick="resetView()">Reset View</button>
+        <button class="btn" onclick="expandAll()">Expand All</button>
+        <button class="btn" onclick="collapseAll()">Collapse All</button>
+    </div>
+    <script>
+        const data = ${jsonData};
+        const layoutSettings = ${layoutData};
+        
+        const svg = d3.select("#galaxy");
+        const g = d3.select("#container");
+        
+        const zoom = d3.zoom()
+            .scaleExtent([0.1, 4])
+            .on("zoom", (event) => g.attr("transform", event.transform));
+            
+        svg.call(zoom);
+        
+        const tree = d3.tree().nodeSize([layoutSettings.verticalSpacing, layoutSettings.horizontalSpacing]);
+        let root = d3.hierarchy(data);
+        
+        function update(source) {
+            const nodes = root.descendants();
+            const links = root.links();
+            
+            tree(root);
+            nodes.forEach(d => d.y = d.depth * layoutSettings.horizontalSpacing);
+            
+            const node = g.selectAll(".node").data(nodes, d => d.data.id);
+            
+            const nodeEnter = node.enter().append("g")
+                .attr("class", "node")
+                .attr("transform", d => \`translate(\${source.y || 0},\${source.x || 0})\`)
+                .on("click", (event, d) => {
+                    if (d.children) {
+                        d._children = d.children;
+                        d.children = null;
+                    } else if (d._children) {
+                        d.children = d._children;
+                        d._children = null;
+                    }
+                    update(d);
+                });
+                
+            nodeEnter.append("circle")
+                .attr("class", "node-main-circle")
+                .attr("r", d => d.depth === 0 ? 12 : 7)
+                .style("fill", d => (d.children || d._children) ? (d.data.color || "#fff") : "transparent")
+                .style("stroke", d => d.data.color || "#fff");
+                
+            nodeEnter.append("text")
+                .attr("dy", "-0.5em")
+                .attr("x", d => (d.children || d._children) ? -22 : 22)
+                .attr("text-anchor", d => (d.children || d._children) ? "end" : "start")
+                .text(d => d.data.name);
+                
+            const nodeUpdate = nodeEnter.merge(node);
+            nodeUpdate.transition().duration(800)
+                .attr("transform", d => \`translate(\${d.y},\${d.x})\`);
+                
+            nodeUpdate.select("circle")
+                .style("fill", d => (d.children || d._children) ? (d.data.color || "#fff") : "transparent");
+                
+            node.exit().transition().duration(600)
+                .attr("transform", d => \`translate(\${source.y},\${source.x})\`)
+                .remove();
+                
+            const link = g.selectAll(".link").data(links, d => d.target.data.id);
+            
+            const linkEnter = link.enter().insert("path", "g")
+                .attr("class", "link")
+                .attr("d", d => {
+                    const o = { x: source.x, y: source.y };
+                    return diagonal(o, o);
+                });
+                
+            linkEnter.merge(link).transition().duration(800)
+                .attr("d", d => diagonal(d.source, d.target));
+                
+            link.exit().transition().duration(600)
+                .attr("d", d => diagonal(source, source))
+                .remove();
+        }
+        
+        function diagonal(s, d) {
+            return \`M \${s.y} \${s.x} C \${(s.y + d.y) / 2} \${s.x}, \${(s.y + d.y) / 2} \${d.x}, \${d.y} \${d.x}\`;
+        }
+        
+        function resetView() {
+            svg.transition().duration(1000).call(
+                zoom.transform,
+                d3.zoomIdentity.translate(80, window.innerHeight / 2).scale(0.7)
+            );
+        }
+        
+        function expandAll() {
+            root.descendants().forEach(d => {
+                if (d._children) {
+                    d.children = d._children;
+                    d._children = null;
+                }
+            });
+            update(root);
+        }
+        
+        function collapseAll() {
+            root.descendants().forEach(d => {
+                if (d.depth > 0 && d.children) {
+                    d._children = d.children;
+                    d.children = null;
+                }
+            });
+            update(root);
+        }
+        
+        update(root);
+        resetView();
+    </script>
+</body>
+</html>`;
     }
   }));
 
