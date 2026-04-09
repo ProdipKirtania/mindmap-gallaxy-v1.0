@@ -8,7 +8,7 @@ import KnowledgeGalaxy, { KnowledgeGalaxyRef } from "./components/KnowledgeGalax
 import { parseMarkdown, ensureIds, generateMarkdown } from "./lib/parser";
 import { INITIAL_MARKDOWN } from "./constants";
 import { motion, AnimatePresence } from "motion/react";
-import { Maximize2, RotateCcw, Plus, Minus, Copy, Search, Download, Trash2, Save, LayoutPanelLeft, LayoutPanelTop, FileText, X, Settings2, FileCode, Image } from "lucide-react";
+import { Maximize2, RotateCcw, Plus, Minus, Copy, Search, Download, Trash2, Save, LayoutPanelLeft, LayoutPanelTop, FileText, X, Settings2, FileCode, Image, Menu } from "lucide-react";
 import { NodeData, FocusSettings, FocusAction, SearchResult, LayoutSettings } from "./types";
 
 const STORAGE_KEY = "knowledge-galaxy-data";
@@ -38,7 +38,8 @@ export default function App() {
     }
     return {
       verticalSpacing: 45,
-      horizontalSpacing: 250
+      horizontalSpacing: 250,
+      colorFreezeLevel: 2
     };
   });
 
@@ -57,6 +58,7 @@ export default function App() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchIndex, setSearchIndex] = useState(-1);
   const [showMarkdown, setShowMarkdown] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [markdown, setMarkdown] = useState(() => generateMarkdown(data));
   const galaxyRef = useRef<KnowledgeGalaxyRef>(null);
 
@@ -262,20 +264,75 @@ export default function App() {
       </AnimatePresence>
 
       {/* Header */}
-      <div className="fixed top-5 left-5 border-l-4 border-white pl-4 z-10 pointer-events-none">
+      <div className="fixed top-5 left-5 border-l-4 border-white pl-4 z-10 pointer-events-none hidden sm:block">
         <h1 className="text-xl font-bold tracking-tight m-0">{data.name}</h1>
         <p className="text-[10px] uppercase opacity-50 font-semibold mt-1">
           DBL CLICK: EDIT • ALT+A: ADD • DEL: REMOVE • CTRL+Z: UNDO
         </p>
       </div>
 
+      {/* Mobile Header */}
+      <div className="fixed top-4 left-4 z-10 sm:hidden flex flex-col gap-1 pointer-events-none">
+        <h1 className="text-lg font-bold tracking-tight m-0 bg-black/40 backdrop-blur-md px-2 py-1 rounded border border-white/10">{data.name}</h1>
+      </div>
+
+      {/* Mobile Menu Toggle */}
+      <button
+        onClick={() => setShowMobileMenu(!showMobileMenu)}
+        className="fixed bottom-5 left-5 z-50 w-12 h-12 bg-accent text-black rounded-full flex items-center justify-center shadow-2xl sm:hidden active:scale-90 transition-all"
+      >
+        {showMobileMenu ? <X size={24} /> : <Menu size={24} />}
+      </button>
+
       {/* Top Controls */}
-      <div className="fixed top-5 right-5 flex items-center gap-3 z-20">
-        <div className="flex items-center gap-1 bg-white/10 border border-white/20 rounded-lg p-1">
+      <div className={`fixed top-4 right-4 sm:top-5 sm:right-5 flex flex-wrap justify-end items-center gap-2 sm:gap-3 z-20 max-w-[calc(100%-2rem)] transition-all duration-300 ${!showMobileMenu ? "translate-y-[-150%] sm:translate-y-0" : "translate-y-0"}`}>
+        <form onSubmit={handleSearch} className="relative group md:hidden w-full mb-2">
+          <input
+            type="text"
+            placeholder="Search nodes..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            className="bg-white/10 border border-white/20 rounded-lg px-4 py-2 pl-10 text-xs outline-none focus:border-accent/50 transition-all w-full backdrop-blur-md"
+          />
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 opacity-40 group-focus-within:opacity-100 transition-opacity" />
+          
+          {/* Mobile Search Results */}
+          <AnimatePresence>
+            {searchResults.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                className="absolute top-full left-0 right-0 mt-2 bg-black/90 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 max-h-64 overflow-y-auto"
+              >
+                {searchResults.map((result, idx) => (
+                  <button
+                    key={result.id}
+                    type="button"
+                    onClick={() => {
+                      galaxyRef.current?.findAndZoom(result.id);
+                      setSearchQuery("");
+                      setSearchResults([]);
+                      setSearchIndex(-1);
+                      setShowMobileMenu(false);
+                    }}
+                    className={`w-full text-left px-4 py-3 transition-colors border-b border-white/5 last:border-none ${searchIndex === idx ? "bg-accent/20" : "hover:bg-white/10"}`}
+                  >
+                    <div className="text-xs font-bold text-accent">{result.name}</div>
+                    <div className="text-[9px] opacity-40 truncate mt-0.5">{result.path}</div>
+                  </button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </form>
+
+        <div className="flex items-center gap-1 bg-white/10 border border-white/20 rounded-lg p-1 backdrop-blur-md">
           <button
             onClick={handleUndo}
             disabled={history.length === 0}
-            className="p-2 hover:bg-white/10 rounded disabled:opacity-20 transition-all"
+            className="p-2 hover:bg-white/10 rounded disabled:opacity-20 transition-all active:bg-white/20"
             title="Undo (Ctrl+Z)"
           >
             <RotateCcw size={14} className="scale-x-[-1]" />
@@ -283,21 +340,21 @@ export default function App() {
           <button
             onClick={handleRedo}
             disabled={redoStack.length === 0}
-            className="p-2 hover:bg-white/10 rounded disabled:opacity-20 transition-all"
+            className="p-2 hover:bg-white/10 rounded disabled:opacity-20 transition-all active:bg-white/20"
             title="Redo (Ctrl+Shift+Z)"
           >
             <RotateCcw size={14} />
           </button>
         </div>
 
-        <form onSubmit={handleSearch} className="relative group">
+        <form onSubmit={handleSearch} className="relative group hidden md:block">
           <input
             type="text"
             placeholder="Search nodes..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={handleSearchKeyDown}
-            className="bg-white/10 border border-white/20 rounded-lg px-4 py-2 pl-10 text-xs outline-none focus:border-accent/50 transition-all w-40 focus:w-64"
+            className="bg-white/10 border border-white/20 rounded-lg px-4 py-2 pl-10 text-xs outline-none focus:border-accent/50 transition-all w-40 focus:w-64 backdrop-blur-md"
           />
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 opacity-40 group-focus-within:opacity-100 transition-opacity" />
           
@@ -337,22 +394,22 @@ export default function App() {
         </form>
 
         <div className="flex flex-col gap-1.5">
-          <span className="text-[9px] uppercase font-bold opacity-30 px-1">Navigation</span>
+          <span className="text-[9px] uppercase font-bold opacity-30 px-1 hidden sm:block">Navigation</span>
           <button
             onClick={() => setShowMarkdown(!showMarkdown)}
-            className={`flex items-center gap-2 border px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all active:scale-95 ${showMarkdown ? "bg-accent text-black border-accent" : "bg-white/10 border-white/20 text-white hover:bg-white/20"}`}
+            className={`flex items-center gap-2 border px-3 sm:px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all active:scale-95 backdrop-blur-md ${showMarkdown ? "bg-accent text-black border-accent" : "bg-white/10 border-white/20 text-white hover:bg-white/20"}`}
             title="Toggle Markdown Editor"
           >
             <FileText size={14} />
-            Editor
+            <span className="hidden xs:inline">Editor</span>
           </button>
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1.5 hidden lg:flex">
           <span className="text-[9px] uppercase font-bold opacity-30 px-1">Clipboard</span>
           <button
             onClick={handleCopy}
-            className="flex items-center gap-2 bg-white/10 border border-white/20 text-white px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all hover:bg-white/20 active:scale-95"
+            className="flex items-center gap-2 bg-white/10 border border-white/20 text-white px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all hover:bg-white/20 active:scale-95 backdrop-blur-md"
             title="Copy as Outline"
           >
             <Copy size={14} />
@@ -360,12 +417,12 @@ export default function App() {
           </button>
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1.5 hidden sm:flex">
           <span className="text-[9px] uppercase font-bold opacity-30 px-1">Export</span>
           <div className="flex gap-1">
             <button
               onClick={handleExportMarkdown}
-              className="flex items-center gap-2 bg-white/10 border border-white/20 text-white px-3 py-2 rounded-lg text-[9px] font-bold uppercase transition-all hover:bg-white/20 active:scale-95"
+              className="flex items-center gap-2 bg-white/10 border border-white/20 text-white px-3 py-2 rounded-lg text-[9px] font-bold uppercase transition-all hover:bg-white/20 active:scale-95 backdrop-blur-md"
               title="Download as Markdown"
             >
               <Download size={12} />
@@ -373,7 +430,7 @@ export default function App() {
             </button>
             <button
               onClick={handleExportSVG}
-              className="flex items-center gap-2 bg-white/10 border border-white/20 text-white px-3 py-2 rounded-lg text-[9px] font-bold uppercase transition-all hover:bg-white/20 active:scale-95"
+              className="flex items-center gap-2 bg-white/10 border border-white/20 text-white px-3 py-2 rounded-lg text-[9px] font-bold uppercase transition-all hover:bg-white/20 active:scale-95 backdrop-blur-md"
               title="Download as SVG"
             >
               <Image size={12} />
@@ -381,7 +438,7 @@ export default function App() {
             </button>
             <button
               onClick={handleExportInteractiveHTML}
-              className="flex items-center gap-2 bg-white/10 border border-white/20 text-white px-3 py-2 rounded-lg text-[9px] font-bold uppercase transition-all hover:bg-white/20 active:scale-95"
+              className="flex items-center gap-2 bg-white/10 border border-white/20 text-white px-3 py-2 rounded-lg text-[9px] font-bold uppercase transition-all hover:bg-white/20 active:scale-95 backdrop-blur-md"
               title="Download Interactive HTML"
             >
               <FileCode size={12} />
@@ -390,21 +447,23 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1.5 hidden xl:flex">
           <span className="text-[9px] uppercase font-bold opacity-30 px-1">Tools</span>
-          <button
-            onClick={() => galaxyRef.current?.groupSelectedNodes()}
-            disabled={selectedNodeIds.length < 2}
-            className="flex items-center gap-2 bg-gold/20 border border-gold/40 text-gold px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all hover:bg-gold/30 active:scale-95 disabled:opacity-20"
-            title="Group Selected Nodes (Alt+G)"
-          >
-            <LayoutPanelTop size={14} />
-            Group
-          </button>
+          <div className="flex gap-1">
+            <button
+              onClick={() => galaxyRef.current?.groupSelectedNodes()}
+              disabled={selectedNodeIds.length < 2}
+              className="flex items-center gap-2 bg-gold/20 border border-gold/40 text-gold px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all hover:bg-gold/30 active:scale-95 disabled:opacity-20 backdrop-blur-md"
+              title="Group Selected Nodes (Alt+G)"
+            >
+              <LayoutPanelTop size={14} />
+              Group
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center gap-3 bg-white/10 backdrop-blur-md border border-white/20 px-3 py-1.5 rounded-full">
-          <span className={focusMode ? "text-accent text-[10px] font-extrabold uppercase" : "text-white/40 text-[10px] font-extrabold uppercase"}>
+          <span className={focusMode ? "text-accent text-[10px] font-extrabold uppercase hidden xs:inline" : "text-white/40 text-[10px] font-extrabold uppercase hidden xs:inline"}>
             Focus
           </span>
           <button
@@ -425,67 +484,89 @@ export default function App() {
           </button>
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1.5 hidden sm:flex">
           <span className="text-[9px] uppercase font-bold opacity-30 px-1">System</span>
           <button
             onClick={handleReset}
-            className="bg-red-500/20 border border-red-500/40 text-red-200 px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all hover:bg-red-500/30 active:scale-95"
+            className="bg-red-500/20 border border-red-500/40 text-red-200 px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all hover:bg-red-500/30 active:scale-95 backdrop-blur-md"
             title="Reset to Initial State"
           >
             <Trash2 size={14} />
           </button>
         </div>
+
+        <div className="flex flex-col gap-1.5 sm:hidden">
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-2 bg-white/10 border border-white/20 text-white px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all hover:bg-white/20 active:scale-95 backdrop-blur-md"
+            title="Copy as Outline"
+          >
+            <Copy size={14} />
+            Copy
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-1.5 sm:hidden">
+          <button
+            onClick={handleReset}
+            className="bg-red-500/20 border border-red-500/40 text-red-200 px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all hover:bg-red-500/30 active:scale-95 backdrop-blur-md"
+            title="Reset to Initial State"
+          >
+            <Trash2 size={14} />
+            Reset
+          </button>
+        </div>
       </div>
 
       {/* Bottom Controls */}
-      <div className="fixed bottom-5 right-5 flex flex-col gap-3 z-20">
+      <div className={`fixed bottom-5 right-5 flex flex-col gap-2 sm:gap-3 z-20 transition-all duration-300 ${showMarkdown ? "translate-x-[200%] lg:translate-x-0" : ""}`}>
         <button
           onClick={() => galaxyRef.current?.expandAll()}
-          className="w-12 h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center transition-all hover:bg-white/20 active:scale-90"
+          className="w-10 h-10 sm:w-12 sm:h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center transition-all hover:bg-white/20 active:scale-90 backdrop-blur-md"
           title="Expand All"
         >
-          <LayoutPanelTop size={20} />
+          <LayoutPanelTop size={18} className="sm:w-5 sm:h-5" />
         </button>
         <button
           onClick={() => galaxyRef.current?.collapseAll()}
-          className="w-12 h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center transition-all hover:bg-white/20 active:scale-90"
+          className="w-10 h-10 sm:w-12 sm:h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center transition-all hover:bg-white/20 active:scale-90 backdrop-blur-md"
           title="Collapse All"
         >
-          <LayoutPanelLeft size={20} />
+          <LayoutPanelLeft size={18} className="sm:w-5 sm:h-5" />
         </button>
         <div className="h-px bg-white/10 mx-2" />
         <button
           onClick={() => galaxyRef.current?.fitToScreen()}
-          className="w-12 h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center transition-all hover:bg-white/20 active:scale-90"
+          className="w-10 h-10 sm:w-12 sm:h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center transition-all hover:bg-white/20 active:scale-90 backdrop-blur-md"
           title="Fit to Screen"
         >
-          <Maximize2 size={20} />
+          <Maximize2 size={18} className="sm:w-5 sm:h-5" />
         </button>
         <button
           onClick={() => galaxyRef.current?.resetView()}
-          className="w-12 h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center transition-all hover:bg-white/20 active:scale-90"
+          className="w-10 h-10 sm:w-12 sm:h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center transition-all hover:bg-white/20 active:scale-90 backdrop-blur-md"
           title="Center View"
         >
-          <RotateCcw size={20} />
+          <RotateCcw size={18} className="sm:w-5 sm:h-5" />
         </button>
         <button
           onClick={() => galaxyRef.current?.zoomIn()}
-          className="w-12 h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center transition-all hover:bg-white/20 active:scale-90"
+          className="w-10 h-10 sm:w-12 sm:h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center transition-all hover:bg-white/20 active:scale-90 backdrop-blur-md"
           title="Zoom In"
         >
-          <Plus size={20} />
+          <Plus size={18} className="sm:w-5 sm:h-5" />
         </button>
         <button
           onClick={() => galaxyRef.current?.zoomOut()}
-          className="w-12 h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center transition-all hover:bg-white/20 active:scale-90"
+          className="w-10 h-10 sm:w-12 sm:h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center transition-all hover:bg-white/20 active:scale-90 backdrop-blur-md"
           title="Zoom Out"
         >
-          <Minus size={20} />
+          <Minus size={18} className="sm:w-5 sm:h-5" />
         </button>
       </div>
 
       {/* Visualization */}
-      <div className={`flex w-full h-full transition-all duration-500 ${showMarkdown ? "pl-[400px]" : ""}`}>
+      <div className={`flex w-full h-full transition-all duration-500 ${showMarkdown ? "lg:pl-[400px]" : ""}`}>
         <KnowledgeGalaxy 
           ref={galaxyRef} 
           data={data} 
@@ -505,8 +586,14 @@ export default function App() {
             initial={{ opacity: 0, y: 10, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.95 }}
-            className="fixed top-20 right-5 z-40 bg-black/80 backdrop-blur-xl border border-white/10 p-4 rounded-xl shadow-2xl w-64"
+            className="fixed top-20 right-4 sm:right-5 z-40 bg-black/80 backdrop-blur-xl border border-white/10 p-4 rounded-xl shadow-2xl w-[calc(100%-2rem)] sm:w-64"
           >
+            <div className="flex justify-between items-center sm:hidden mb-4">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-accent">Settings</h3>
+              <button onClick={() => setShowFocusSettings(false)} className="p-1 hover:bg-white/10 rounded">
+                <X size={14} />
+              </button>
+            </div>
             <div className="mb-6">
               <h3 className="text-[10px] font-bold uppercase tracking-widest text-accent mb-4">Layout Settings</h3>
               <div className="space-y-4">
@@ -548,6 +635,29 @@ export default function App() {
                     className="w-full accent-accent"
                   />
                 </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-[10px] uppercase font-bold opacity-60">
+                    <span>Color Freeze Level</span>
+                    <span>Level {layoutSettings.colorFreezeLevel}</span>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <input 
+                      type="range" 
+                      min="1" 
+                      max="6" 
+                      step="1"
+                      value={layoutSettings.colorFreezeLevel}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value);
+                        const newSettings = { ...layoutSettings, colorFreezeLevel: val };
+                        setLayoutSettings(newSettings);
+                        localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(newSettings));
+                      }}
+                      className="w-full accent-accent"
+                    />
+                    <p className="text-[8px] opacity-40 italic">After this level, child nodes use the same color as their parent.</p>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -581,11 +691,11 @@ export default function App() {
       <AnimatePresence>
         {showMarkdown && (
           <motion.div
-            initial={{ x: -400 }}
+            initial={{ x: "-100%" }}
             animate={{ x: 0 }}
-            exit={{ x: -400 }}
+            exit={{ x: "-100%" }}
             transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className="fixed top-0 left-0 w-[400px] h-full bg-black/40 backdrop-blur-xl border-r border-white/10 z-30 flex flex-col pt-24 pb-10 px-6 shadow-2xl"
+            className="fixed top-0 left-0 w-full sm:w-[400px] h-full bg-black/60 backdrop-blur-2xl border-r border-white/10 z-30 flex flex-col pt-20 sm:pt-24 pb-10 px-4 sm:px-6 shadow-2xl"
           >
             <div className="flex items-center justify-between mb-6">
               <div>

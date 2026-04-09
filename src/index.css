@@ -12,6 +12,9 @@
   body {
     @apply bg-bg text-white font-sans overflow-hidden;
   }
+  svg {
+    touch-action: none;
+  }
 }
 
 .node circle {
@@ -45,6 +48,16 @@
   @apply !opacity-100;
   stroke-opacity: 0.9 !important;
   stroke-width: 3.5px !important;
+}
+ 
+.hover-highlight {
+  @apply !opacity-100;
+  filter: drop-shadow(0 0 12px var(--color-accent));
+}
+
+.hover-highlight.link {
+  stroke-width: 4px !important;
+  stroke-opacity: 0.8 !important;
 }
 
 .completed {

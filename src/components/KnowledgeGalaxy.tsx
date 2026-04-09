@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from "react";
 import * as d3 from "d3";
+import { X } from "lucide-react";
 import { HierarchyNode, HierarchyLink, NodeData, FocusSettings, FocusAction, SearchResult, LayoutSettings } from "../types";
 import { cn } from "../lib/utils";
 
@@ -60,6 +61,7 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
     d: HierarchyNode 
   } | null>(null);
   const [hoveredNode, setHoveredNode] = useState<{
+    id: string;
     x: number;
     y: number;
     name: string;
@@ -166,9 +168,41 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
 
   useEffect(() => {
     if (!data) return;
+
+    // Store old positions to preserve them across hierarchy recreations
+    const oldPositions = new Map<string, { x: number; y: number }>();
+    if (root) {
+      root.descendants().forEach((d) => {
+        oldPositions.set(d.data.id, { x: d.x, y: d.y });
+      });
+    }
+
     const hierarchyRoot = d3.hierarchy(data) as HierarchyNode;
-    hierarchyRoot.x0 = window.innerHeight / 2;
-    hierarchyRoot.y0 = 0;
+
+    // Restore positions as x0, y0 for smooth transitions
+    hierarchyRoot.descendants().forEach((d) => {
+      const pos = oldPositions.get(d.data.id);
+      if (pos) {
+        d.x0 = pos.x;
+        d.y0 = pos.y;
+        d.x = pos.x;
+        d.y = pos.y;
+      } else {
+        // For new nodes, start from parent's position if available
+        const parentPos = d.parent ? oldPositions.get(d.parent.data.id) : null;
+        if (parentPos) {
+          d.x0 = parentPos.x;
+          d.y0 = parentPos.y;
+          d.x = parentPos.x;
+          d.y = parentPos.y;
+        } else {
+          d.x0 = window.innerHeight / 2;
+          d.y0 = 0;
+          d.x = window.innerHeight / 2;
+          d.y = 0;
+        }
+      }
+    });
 
     // Respect the collapsed property from data
     const applyCollapse = (d: HierarchyNode) => {
@@ -194,6 +228,12 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
     if (!zoomRef.current) {
       zoomRef.current = d3.zoom<SVGSVGElement, unknown>()
         .scaleExtent([0.1, 4])
+        .filter((event) => {
+          // Allow wheel events
+          if (event.type === 'wheel') return true;
+          
+          return !event.button;
+        })
         .on("zoom", (event) => {
           g.attr("transform", event.transform);
         });
@@ -201,6 +241,12 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
       
       // Initial position
       svg.call(zoomRef.current.transform, d3.zoomIdentity.translate(80, window.innerHeight / 2).scale(0.7));
+    } else {
+      // Update filter
+      zoomRef.current.filter((event) => {
+        if (event.type === 'wheel') return true;
+        return !event.button;
+      });
     }
 
     // Clear focus classes if focus mode is turned off
@@ -212,26 +258,95 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
     
     let targetId = focusedNodeId;
     if (focusMode && !targetId && selectedNodeIds.length === 1) {
-      targetId = selectedNodeIds[0];
-      setFocusedNodeId(targetId);
+      const newTargetId = selectedNodeIds[0];
+      if (newTargetId !== focusedNodeId) {
+        setFocusedNodeId(newTargetId);
+      }
+    }
+  }, [root, layoutSettings, selectedNodeIds]);
+
+  useEffect(() => {
+    if (!gRef.current || !root) return;
+    const g = d3.select(gRef.current);
+
+    // Clear focus classes if focus mode is turned off
+    if (!focusMode) {
+      g.selectAll(".node, .link").classed("dimmed", false).classed("focused", false).classed("hidden-node", false).classed("hover-highlight", false);
+      return;
     }
 
-    if (focusMode && targetId) {
+    let targetId = focusedNodeId;
+    if (targetId) {
       const target = root.descendants().find(n => n.data.id === targetId);
       if (target) applyFocus(target as HierarchyNode);
     }
-  }, [root, focusMode, focusSettings, selectedNodeIds]);
+
+    // Apply hover highlight in focus mode
+    if (hoveredNode) {
+      const target = root.descendants().find(n => n.data.id === hoveredNode.id);
+      if (target) {
+        const neighbors = new Set([
+          target.data.id,
+          ...(target.parent ? [target.parent.data.id] : []),
+          ...(target.children ? target.children.map(c => c.data.id) : [])
+        ]);
+
+        g.selectAll<SVGGElement, HierarchyNode>(".node").each(function(d) {
+          if (neighbors.has(d.data.id)) {
+            d3.select(this).classed("hover-highlight", true).classed("dimmed", false);
+          } else {
+            d3.select(this).classed("hover-highlight", false);
+          }
+        });
+
+        g.selectAll<SVGPathElement, HierarchyLink>(".link").each(function(d) {
+          if (neighbors.has(d.source.data.id) && neighbors.has(d.target.data.id)) {
+            d3.select(this).classed("hover-highlight", true).classed("dimmed", false);
+          } else {
+            d3.select(this).classed("hover-highlight", false);
+          }
+        });
+      }
+    } else {
+      // Clear hover highlights if no node is hovered
+      g.selectAll(".node, .link").classed("hover-highlight", false);
+      // Re-apply focus to ensure correct dimming
+      if (targetId) {
+        const target = root.descendants().find(n => n.data.id === targetId);
+        if (target) applyFocus(target as HierarchyNode);
+      }
+    }
+  }, [root, focusMode, focusSettings, focusedNodeId, hoveredNode]);
 
   const getHue = (d: HierarchyNode) => {
-    if (d.depth === 0) return "#fff";
+    if (d.depth === 0) return d.data.color || "#fff";
+    
+    const freezeDepth = Math.max(0, layoutSettings.colorFreezeLevel - 1);
     let p = d;
-    while (p.depth > 1 && p.parent) p = p.parent as HierarchyNode;
-    return p.data.color || "#fff";
+    while (p.depth > freezeDepth && p.parent) p = p.parent as HierarchyNode;
+    
+    if (p.data.color) return p.data.color;
+    
+    // Fallback: Generate a stable color based on node ID if no color is specified
+    // This ensures nodes up to freezeDepth have distinct colors even if not in data
+    const hash = (str: string) => {
+      let h = 0;
+      for (let i = 0; i < str.length; i++) {
+        h = (h << 5) - h + str.charCodeAt(i);
+        h |= 0;
+      }
+      return Math.abs(h);
+    };
+    
+    return COLOR_PALETTE[hash(p.data.id) % COLOR_PALETTE.length];
   };
 
   const diagonal = (s: { x: number; y: number }, d: { x: number; y: number }) => {
     return `M ${s.y} ${s.x} C ${(s.y + d.y) / 2} ${s.x}, ${(s.y + d.y) / 2} ${d.x}, ${d.y} ${d.x}`;
   };
+
+  const lastTapRef = useRef<{ id: string; time: number } | null>(null);
+  const longPressTimerRef = useRef<any>(null);
 
   const update = (source: HierarchyNode) => {
     if (!gRef.current || !root) return;
@@ -251,7 +366,7 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
     const nodeEnter = node.enter()
       .append("g")
       .attr("class", "node")
-      .attr("transform", () => `translate(${source.y0 || 0},${source.x0 || 0})`)
+      .attr("transform", () => `translate(${source.y0 ?? source.y},${source.x0 ?? source.x})`)
       .on("dblclick", function (event, d) {
         event.stopPropagation();
         handleStartEdit(d);
@@ -260,9 +375,36 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
         event.preventDefault();
         addChild(d);
       })
+      .on("touchstart", function(event, d) {
+        // Handle double tap for mobile
+        const now = Date.now();
+        if (lastTapRef.current && lastTapRef.current.id === d.data.id && (now - lastTapRef.current.time) < 300) {
+          event.preventDefault();
+          handleStartEdit(d);
+          lastTapRef.current = null;
+          if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+        } else {
+          lastTapRef.current = { id: d.data.id, time: now };
+          
+          // Handle long press
+          if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+          longPressTimerRef.current = setTimeout(() => {
+            addChild(d);
+            if (window.navigator.vibrate) window.navigator.vibrate(50);
+          }, 600);
+        }
+      })
+      .on("touchend", () => {
+        if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+      })
+      .on("touchmove", () => {
+        if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+      })
       .on("mouseover", function(event, d) {
+        if ('ontouchstart' in window) return; // Skip hover on touch devices
         const transform = d3.zoomTransform(svgRef.current!);
         setHoveredNode({
+          id: d.data.id,
           x: transform.x + d.y * transform.k,
           y: transform.y + d.x * transform.k,
           name: d.data.name,
@@ -273,6 +415,18 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
       .on("click", function (event, d) {
         if (event.target.tagName === "text") return;
         
+        // Show tooltip on click for touch devices
+        if ('ontouchstart' in window) {
+          const transform = d3.zoomTransform(svgRef.current!);
+          setHoveredNode({
+            id: d.data.id,
+            x: transform.x + d.y * transform.k,
+            y: transform.y + d.x * transform.k,
+            name: d.data.name,
+            metadata: d.data.metadata
+          });
+        }
+
         if (event.shiftKey) {
           if (selectedNodeIds.includes(d.data.id)) {
             onSelectionChange(selectedNodeIds.filter(id => id !== d.data.id));
@@ -327,7 +481,7 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
       .style("stroke-width", "2px")
       .style("stroke-dasharray", "4,2");
 
-    // Add/Delete buttons on hover
+    // Add/Delete buttons
     const controls = nodeEnter.append("g")
       .attr("class", "node-controls opacity-0 transition-opacity duration-200")
       .attr("transform", "translate(0, -25)");
@@ -390,10 +544,14 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
     nodeUpdate.select(".node-main-circle")
       .attr("r", (d) => (d.depth === 0 ? 12 : 7))
       .style("fill", (d) => (d.children || d._children ? getHue(d) : "transparent"))
-      .style("stroke", (d) => d.data.color || getHue(d));
+      .style("stroke", (d) => getHue(d));
 
     nodeUpdate.select(".selection-ring")
       .attr("r", (d) => (d.depth === 0 ? 18 : 13))
+      .classed("opacity-100", (d) => selectedNodeIds.includes(d.data.id))
+      .classed("opacity-0", (d) => !selectedNodeIds.includes(d.data.id));
+
+    nodeUpdate.select(".node-controls")
       .classed("opacity-100", (d) => selectedNodeIds.includes(d.data.id))
       .classed("opacity-0", (d) => !selectedNodeIds.includes(d.data.id));
 
@@ -415,7 +573,7 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
       .attr("class", "link")
       .style("stroke", (d) => getHue(d.target))
       .attr("d", () => {
-        const o = { x: source.x0 || 0, y: source.y0 || 0 };
+        const o = { x: source.x0 ?? source.x, y: source.y0 ?? source.y };
         return diagonal(o, o);
       });
 
@@ -423,6 +581,7 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
       .transition()
       .duration(800)
       .attr("d", (d) => diagonal(d.source, d.target))
+      .style("stroke", (d) => getHue(d.target))
       .style("opacity", (d) => {
         if (searchHighlightIds.length > 0) {
           return searchHighlightIds.includes(d.target.data.id) ? 1 : 0.1;
@@ -430,7 +589,10 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
         return 1;
       });
 
-    link.exit().transition().duration(600).attr("d", () => diagonal(source, source)).remove();
+    link.exit().transition().duration(600).attr("d", () => {
+      const o = { x: source.x, y: source.y };
+      return diagonal(o, o);
+    }).remove();
 
     nodes.forEach((d) => {
       d.x0 = d.x;
@@ -921,20 +1083,40 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
 
   return (
     <div className="relative w-full h-full">
-      <svg ref={svgRef} className="w-full h-full cursor-grab active:cursor-grabbing">
+      <svg 
+        ref={svgRef} 
+        className="w-full h-full cursor-grab active:cursor-grabbing outline-none"
+      >
         <g ref={gRef} />
       </svg>
       
       {editingNode && (
         <div 
-          className="absolute z-50 pointer-events-none"
+          className="fixed inset-0 sm:absolute sm:inset-auto z-50 flex items-center justify-center sm:block pointer-events-none"
           style={{ 
-            left: editingNode.x, 
-            top: editingNode.y,
-            transform: 'translate(-50%, -50%)'
+            left: 'var(--edit-x, 50%)', 
+            top: 'var(--edit-y, 50%)',
+            transform: 'var(--edit-transform, none)'
+          }}
+          ref={(el) => {
+            if (el && window.innerWidth > 640) {
+              el.style.setProperty('--edit-x', `${editingNode.x}px`);
+              el.style.setProperty('--edit-y', `${editingNode.y}px`);
+              el.style.setProperty('--edit-transform', 'translate(-50%, -50%)');
+            } else if (el) {
+              el.style.setProperty('--edit-x', '0');
+              el.style.setProperty('--edit-y', '0');
+              el.style.setProperty('--edit-transform', 'none');
+            }
           }}
         >
-          <div className="pointer-events-auto bg-bg border-2 border-accent p-3 rounded-xl shadow-2xl flex flex-col gap-3 min-w-[200px]">
+          <div className="pointer-events-auto bg-bg border-2 border-accent p-4 sm:p-3 rounded-xl shadow-2xl flex flex-col gap-3 w-[90%] max-w-[320px] sm:min-w-[200px] sm:w-auto">
+            <div className="flex justify-between items-center sm:hidden">
+              <span className="text-[10px] uppercase font-bold text-accent">Edit Node</span>
+              <button onClick={handleCancelEdit} className="p-1 hover:bg-white/10 rounded">
+                <X size={14} />
+              </button>
+            </div>
             <input
               ref={inputRef}
               type="text"
@@ -989,19 +1171,31 @@ const KnowledgeGalaxy = forwardRef<KnowledgeGalaxyRef, KnowledgeGalaxyProps>(({
 
       {hoveredNode && (
         <div 
-          className="absolute z-40 pointer-events-none bg-black/80 backdrop-blur-md border border-white/20 px-3 py-2 rounded-lg shadow-xl text-xs max-w-[200px]"
+          className="fixed bottom-24 left-1/2 -translate-x-1/2 sm:absolute sm:bottom-auto sm:left-auto sm:translate-x-0 z-40 pointer-events-none bg-black/80 backdrop-blur-md border border-white/20 px-3 py-2 rounded-lg shadow-xl text-xs w-[90%] max-w-[280px] sm:max-w-[200px]"
           style={{ 
-            left: hoveredNode.x + 20, 
-            top: hoveredNode.y - 20,
+            left: window.innerWidth > 640 ? hoveredNode.x + 20 : undefined, 
+            top: window.innerWidth > 640 ? hoveredNode.y - 20 : undefined,
           }}
         >
-          <div className="font-bold text-accent mb-1">{hoveredNode.name}</div>
+          <div className="flex justify-between items-start mb-1">
+            <div className="font-bold text-accent">{hoveredNode.name}</div>
+            <button 
+              className="sm:hidden pointer-events-auto p-1 -mr-1 -mt-1 opacity-40 hover:opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                setHoveredNode(null);
+              }}
+            >
+              <X size={12} />
+            </button>
+          </div>
           {hoveredNode.metadata && (
-            <div className="opacity-80 text-[10px] mb-2 border-t border-white/10 pt-1 leading-relaxed">
+            <div className="opacity-80 text-[10px] mb-2 border-t border-white/10 pt-1 leading-relaxed max-h-32 overflow-y-auto">
               {hoveredNode.metadata}
             </div>
           )}
-          <div className="opacity-40 text-[9px] uppercase font-bold">Double-click to edit</div>
+          <div className="opacity-40 text-[9px] uppercase font-bold hidden sm:block">Double-click to edit</div>
+          <div className="opacity-40 text-[9px] uppercase font-bold sm:hidden">Double-tap to edit</div>
         </div>
       )}
     </div>

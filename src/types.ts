@@ -11,6 +11,7 @@ export interface FocusSettings {
 export interface LayoutSettings {
   verticalSpacing: number;
   horizontalSpacing: number;
+  colorFreezeLevel: number;
 }
 
 export interface NodeData {
